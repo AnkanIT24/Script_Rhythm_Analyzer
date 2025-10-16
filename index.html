@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>🎭 Script Rhythm Analyzer - AI Agent (v2)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+  <div class="bg-white p-6 rounded-xl shadow-lg w-full max-w-2xl">
+    <h1 class="text-3xl font-bold mb-4 text-center text-blue-700">🎭 Script Rhythm Analyzer</h1>
+    <p class="text-center text-gray-600 mb-4">Paste your script below and let the AI analyze its rhythm and pacing.</p>
+
+    <textarea id="scriptInput" rows="10" class="w-full p-3 border rounded-md focus:outline-none focus:ring focus:ring-blue-300" placeholder="Paste your script here..."></textarea>
+
+    <button id="checkBtn" onclick="analyzeRhythm()" class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-md font-semibold">Check Rhythm</button>
+
+    <div id="resultBox" class="mt-6 text-xl font-medium text-center"></div>
+    <div id="detailsBox" class="mt-2 text-sm text-gray-600 text-center"></div>
+
+    <!-- Visual rhythm bars -->
+    <div id="barGraph" class="mt-4 flex items-end gap-1 h-32"></div>
+
+    <!-- Optional small diagnostics -->
+    <div id="diagnostics" class="mt-4 text-xs text-gray-500"></div>
+  </div>
+
+  <script>
+    // -------------------------
+    // Helper functions
+    // -------------------------
+    function safeSplitLines(text) {
+      return text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    }
+
+    function mean(arr) { return arr.length ? arr.reduce((a,b) => a+b, 0)/arr.length : 0; }
+    function stdDev(arr) { 
+      if (!arr.length) return 0; 
+      const m = mean(arr); 
+      return Math.sqrt(arr.reduce((acc, x) => acc + Math.pow(x-m,2),0)/arr.length); 
+    }
+    function countMatches(text, regex) { return (text.match(regex) || []).length; }
+
+    const ACTION_WORDS = ["run","ran","daud","dauda","jump","jumped","fall","fell","cry","cried","shout","shouted","scream","screamed","stop","stopped","breathe","saans","laugh","smile","look","turn","pause","freeze","hide","chase","chased","catch","slip","fisla","sambhal","climb","chadha","disappear","gayab","gaya","chala","pouch","paucha","walk","walked"];
+    function countActionWords(text) {
+      const pattern = new RegExp('\\b(' + ACTION_WORDS.join('|') + ')\\b', 'gi');
+      return countMatches(text, pattern);
+    }
+
+    // -------------------------
+    // Local Rhythm Analyzer
+    // -------------------------
+    function localAnalysis(script) {
+      const lines = safeSplitLines(script);
+      const lengths = lines.map(l => l.length);
+      const avg = mean(lengths);
+      const sd = stdDev(lengths);
+      const uniqueLengths = new Set(lengths.map(l => Math.round(l / 5)));
+      const flowMarkers = countMatches(script, /[—–-]|\.{2,}|…|,|—|\u2014/g);
+      const activeCount = countActionWords(script);
+
+      let verdict = "";
+      const suggestions = [];
+
+      if (lines.length === 0) {
+        verdict = "⚠️ No script entered.";
+        suggestions.push("Paste some text to analyze.");
+        return { verdict, suggestions, lines, lengths, avg, sd, uniqueLengthsSize: uniqueLengths.size, flowMarkers, activeCount };
+      }
+
+      if (sd < 8 && uniqueLengths.size <= 2) {
+        verdict = "⚠️ Flat rhythm detected — very uniform line lengths.";
+        suggestions.push("Mix short punchy lines with longer descriptive lines.");
+      } else if (sd >= 8 && sd < 40) { 
+        verdict = "✅ Good rhythm — healthy variation.";
+      } else {
+        verdict = "⚠️ Highly uneven rhythm — may feel jumpy or disjointed.";
+        suggestions.push("Try smoothing transitions: keep some steady lines between big jumps in length.");
+      }
+
+      if (flowMarkers < Math.max(1, lines.length / 2)) suggestions.push("Add natural pauses or punctuation (—, …, commas) to create breathing space.");
+      if (activeCount < Math.max(1, Math.floor(lines.length / 3))) suggestions.push("Add more active/emotional verbs to create motion and tension.");
+
+      const tokens = script.toLowerCase().match(/\b\w+\b/g) || [];
+      const freq = {};
+      for (const t of tokens) freq[t] = (freq[t] || 0) + 1;
+      const highFreqWords = Object.entries(freq).filter(([w,c]) => c > Math.max(3, Math.floor(tokens.length*0.06)));
+      if (highFreqWords.length) {
+        const words = highFreqWords.map(([w])=>w).slice(0,5).join(", ");
+        suggestions.push(`Watch repetition (overused: ${words}). Use synonyms or restructure lines.`);
+      }
+
+      if (!suggestions.length) suggestions.push("Nice! The script shows good variation and flow.");
+
+      return { verdict, suggestions, lines, lengths, avg, sd, uniqueLengthsSize: uniqueLengths.size, flowMarkers, activeCount };
+    }
+
+    // -------------------------
+    // Visualizer
+    // -------------------------
+    function renderBarGraph(lengths) {
+      const container = document.getElementById('barGraph');
+      container.innerHTML = "";
+      if (!lengths || lengths.length === 0) return;
+      const max = Math.max(...lengths);
+      lengths.forEach(len => {
+        const div = document.createElement('div');
+        div.style.height = `${Math.max(4, Math.round((len/max)*100))}%`;
+        div.style.width = `${Math.max(4, Math.round(100/lengths.length))}%`;
+        div.className = "bg-gradient-to-t from-blue-400 to-blue-200 rounded-sm";
+        div.title = `${len} chars`;
+        container.appendChild(div);
+      });
+    }
+
+    // -------------------------
+    // AI Integration
+    // -------------------------
+    const USE_AI_FEEDBACK = true;
+    const HF_TOKEN = "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"; // <--- Your actual token
+    const MODEL = "EleutherAI/gpt-j-6B";
+
+    async function analyzeWithAI(scriptText) {
+      if (!USE_AI_FEEDBACK) return "AI feedback disabled (USE_AI_FEEDBACK=false).";
+      if (!HF_TOKEN) return "⚠️ Replace HF_TOKEN with your Hugging Face token."; // <-- Corrected line
+      const prompt = `You are an expert scriptwriter and voiceover director. Script:\n"""${scriptText}"""`;
+      try {
+        const res = await fetch(`https://api-inference.huggingface.co/models/${MODEL}`, {
+          method:"POST",
+          headers:{"Authorization":`Bearer ${HF_TOKEN}`,"Content-Type":"application/json"},
+          body:JSON.stringify({inputs:prompt, parameters:{max_new_tokens:180,temperature:0.2,return_full_text:false}})
+        });
+        const text = await res.text();
+        try { return JSON.parse(text)?.generated_text || text.trim(); } catch { return text.trim(); }
+      } catch(e){ return "⚠️ Error connecting to Hugging Face API"; }
+    }
+
+    // -------------------------
+    // Main function
+    // -------------------------
+    async function analyzeRhythm() {
+      document.getElementById('resultBox').innerText="⏳ Analyzing...";
+      document.getElementById('detailsBox').innerText="";
+      document.getElementById('diagnostics').innerText="";
+      const script = document.getElementById('scriptInput').value || "";
+      const analysis = localAnalysis(script);
+      document.getElementById('resultBox').innerText = analysis.verdict || "Analysis complete.";
+      const detailsEl = document.getElementById('detailsBox');
+      detailsEl.innerHTML = `
+        <div>📊 Avg length: <strong>${analysis.avg.toFixed(1)}</strong> | Std. Dev: <strong>${analysis.sd.toFixed(1)}</strong> | Lines: <strong>${analysis.lines.length}</strong></div>
+        <div class="mt-2">🔍 Quick suggestions:</div>
+        <ul class="text-left inline-block mt-2">
+          ${analysis.suggestions.map(s=>`<li>• ${s}</li>`).join('')}
+        </ul>`;
+      renderBarGraph(analysis.lengths);
+      document.getElementById('diagnostics').innerText = `flowMarkers: ${analysis.flowMarkers} | actionWords: ${analysis.activeCount} | uniqueLengthBuckets: ${analysis.uniqueLengthsSize}`;
+      const aiBox = document.createElement('div');
+      aiBox.className="mt-4 p-3 bg-gray-50 border rounded-md text-sm text-gray-700";
+      aiBox.innerText="🤖 AI Feedback: Loading...";
+      detailsEl.appendChild(aiBox);
+      aiBox.innerText="🤖 AI Feedback: "+await analyzeWithAI(script);
+    }
+
+    document.getElementById('scriptInput').addEventListener('keydown', (e)=>{
+      if(e.ctrlKey && e.key==='Enter') analyzeRhythm();
+    });
+  </script>
+</body>
+</html>
